@@ -1,0 +1,71 @@
+import asyncio
+from bleak import BleakScanner, BleakClient
+import RPi.GPIO as GPIO
+
+# GPIO configuration for PWM LED on pin 18
+GPIO.setwarnings(False)
+LED_OUTPUT = 18
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(LED_OUTPUT, GPIO.OUT)
+led_pwm = GPIO.PWM(LED_OUTPUT, 1000)
+led_pwm.start(0)
+
+# BLE constants
+DEVICE_NAME = "LightSensor"
+CHARACTERISTIC_UUID = "00002a56-0000-1000-8000-00805f9b34fb"
+
+# Convert lux reading to a PWM percentage (0?100)
+def convert_lux_to_brightness(lux_value):
+    if lux_value < 100:
+        return 0
+    elif lux_value > 800:
+        return 100
+    else:
+        return int((lux_value - 100) * 100 / 700)
+
+# Callback to process received lux value
+def handle_notification(sender, data):
+    lux = int.from_bytes(data, byteorder='little')
+    brightness = convert_lux_to_brightness(lux)
+    led_pwm.ChangeDutyCycle(brightness)
+    print(f"Light Level: {lux} lux ? LED at {brightness}% brightness")
+
+# Scan for BLE device by advertised name
+async def search_device():
+    print("Looking for BLE device...")
+    devices = await BleakScanner.discover()
+    for device in devices:
+        if device.name == DEVICE_NAME:
+            print(f"{DEVICE_NAME} found at address {device.address}")
+            return device.address
+    return None
+
+# Establish connection and subscribe to notifications
+async def connect_and_subscribe(mac_address):
+    try:
+        async with BleakClient(mac_address, timeout=20.0) as client:
+            print(f"Connected to {DEVICE_NAME} over BLE")
+            await client.start_notify(CHARACTERISTIC_UUID, handle_notification)
+            while await client.is_connected():
+                await asyncio.sleep(1)
+    except Exception as error:
+        print(f"Error or disconnect: {error}")
+
+# Continuous loop to maintain BLE connection
+async def run_loop():
+    while True:
+        address = await search_device()
+        if address:
+            await connect_and_subscribe(address)
+        else:
+            print("Device not found. Retrying shortly...")
+            await asyncio.sleep(5)
+
+# Execute main program
+try:
+    asyncio.run(run_loop())
+except KeyboardInterrupt:
+    print("Program interrupted by user.")
+finally:
+    led_pwm.stop()
+    GPIO.cleanup()
