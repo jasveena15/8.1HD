@@ -1,0 +1,44 @@
+#include <Wire.h>
+#include <BH1750.h>
+#include <ArduinoBLE.h>
+
+// Create sensor and BLE objects
+BH1750 sensor;
+
+BLEService luxService("180C");  // BLE service UUID
+BLEUnsignedIntCharacteristic luxCharacteristic("2A56", BLERead | BLENotify);  // Lux value
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);  // Wait for serial connection to start
+
+  Wire.begin();
+  sensor.begin();  // Initialize BH1750 sensor
+
+  if (!BLE.begin()) {
+    Serial.println("BLE initialization failed");
+    while (true);  // Stop program if BLE fails
+  }
+
+  // Configure BLE device
+  BLE.setLocalName("LightSensor");
+  BLE.setAdvertisedService(luxService);
+  luxService.addCharacteristic(luxCharacteristic);
+  BLE.addService(luxService);
+  BLE.advertise();  // Start BLE advertising
+
+  Serial.println("BLE device active and broadcasting...");
+}
+
+void loop() {
+  int luxReading = static_cast<int>(sensor.readLightLevel());
+
+  if (BLE.connected()) {
+    luxCharacteristic.writeValue(luxReading);  // Notify central if connected
+  }
+
+  Serial.print("Ambient Lux: ");
+  Serial.println(luxReading);
+
+  delay(1000);  // Wait before next reading
+}
